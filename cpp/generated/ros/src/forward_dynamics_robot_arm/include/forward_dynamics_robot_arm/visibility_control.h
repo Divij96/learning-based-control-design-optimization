@@ -1,0 +1,32 @@
+#ifndef FORWARD_DYNAMICS_ROBOT_ARM__VISIBILITY_CONTROL_H_
+#define FORWARD_DYNAMICS_ROBOT_ARM__VISIBILITY_CONTROL_H_
+#if defined _WIN32 || defined __CYGWIN__
+  #ifdef __GNUC__
+    #define FORWARD_DYNAMICS_ROBOT_ARM_EXPORT __attribute__ ((dllexport))
+    #define FORWARD_DYNAMICS_ROBOT_ARM_IMPORT __attribute__ ((dllimport))
+  #else
+    #define FORWARD_DYNAMICS_ROBOT_ARM_EXPORT __declspec(dllexport)
+    #define FORWARD_DYNAMICS_ROBOT_ARM_IMPORT __declspec(dllimport)
+  #endif
+  #ifdef FORWARD_DYNAMICS_ROBOT_ARM_BUILDING_LIBRARY
+    #define FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC FORWARD_DYNAMICS_ROBOT_ARM_EXPORT
+  #else
+    #define FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC FORWARD_DYNAMICS_ROBOT_ARM_IMPORT
+  #endif
+  #define FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC_TYPE FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC
+  #define FORWARD_DYNAMICS_ROBOT_ARM_LOCAL
+#else
+  #define FORWARD_DYNAMICS_ROBOT_ARM_EXPORT __attribute__ ((visibility("default")))
+  #define FORWARD_DYNAMICS_ROBOT_ARM_IMPORT
+  #if __GNUC__ >= 4
+    #define FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC __attribute__ ((visibility("default")))
+    #define FORWARD_DYNAMICS_ROBOT_ARM_LOCAL  __attribute__ ((visibility("hidden")))
+  #else
+    #define FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC
+    #define FORWARD_DYNAMICS_ROBOT_ARM_LOCAL
+  #endif
+  #define FORWARD_DYNAMICS_ROBOT_ARM_PUBLIC_TYPE
+#endif
+#endif  // FORWARD_DYNAMICS_ROBOT_ARM__VISIBILITY_CONTROL_H_
+// Generated 02-Feb-2024 13:35:31
+// Copyright 2019-2020 The MathWorks, Inc.
