@@ -1,0 +1,22 @@
+# Reconstructed research environment (Linux, Python 3.7).
+# Core versions below come from metadata embedded in a trained SB3 model.
+cloudpickle==2.2.1
+gym==0.26.2
+gymnasium[mujoco]==0.28.1
+numpy==1.21.6
+stable-baselines3==2.0.0
+torch==1.13.1
+
+# Scientific and experiment dependencies compatible with Python 3.7.
+HEBO==0.3.5
+matplotlib==3.5.3
+mujoco==2.3.7
+pandas==1.3.5
+scikit-learn==1.0.2
+scipy==1.7.3
+shapely==2.0.1
+tensorboard==2.10.0
+tqdm==4.66.1
+
+# ROS Python modules and generated MATLAB wrappers are supplied by the
+# ROS Noetic / MATLAB R2023a workspace and are not installable from this file.

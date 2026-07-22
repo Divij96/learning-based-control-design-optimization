@@ -1,0 +1,13 @@
+<launch>
+    <!-- Load the URDF file into the parameter server -->
+    <param name="robot_description" textfile="$(find custom_robot)/urdf/robot.urdf" />
+
+    <!-- Run the robot_state_publisher -->
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher"/>
+
+    <!-- Your custom script for publishing joint states -->
+    <node name="eval_6dof_robot" pkg="forward_dynamics_robot_arm" type="eval_6dof_robot.py" output="screen" />
+
+    <!-- Start RViz -->
+    <node name="rviz" pkg="rviz" type="rviz" required="true"/>
+</launch>

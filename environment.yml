@@ -1,0 +1,8 @@
+name: master-thesis
+channels:
+  - conda-forge
+dependencies:
+  - python=3.7.16
+  - pip=22.3.1
+  - pip:
+      - -r requirements.txt

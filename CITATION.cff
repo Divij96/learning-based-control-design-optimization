@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use this research software, please cite the repository and the associated master's thesis."
+title: "Learning-Based Control and Design Co-Optimization"
+type: software
+authors:
+  - family-names: Grover
+    given-names: Divij
+repository-code: "https://github.com/Divij96/master_thesis"
+license: MIT
+keywords:
+  - reinforcement learning
+  - control
+  - design optimization
+  - Bayesian optimization
+  - robotics

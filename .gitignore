@@ -1,0 +1,67 @@
+# Operating-system and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+.Python
+.venv/
+venv/
+env/
+.env
+.env.*
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ROS / Catkin
+.catkin_tools/
+**/.catkin_workspace
+**/build/
+**/devel/
+**/install/
+**/log/
+
+# MATLAB / Simulink generated files
+**/slprj/
+**/*_grt_rtw/
+*.slxc
+*.mexa64
+*.mexw64
+*.mexmaci64
+*.asv
+*.autosave
+
+# C/C++ build products
+*.o
+*.obj
+*.a
+*.out
+CMakeCache.txt
+CMakeFiles/
+compile_commands.json
+
+# Reinforcement-learning runs and generated assets
+**/*tensorboard*/
+**/trained_model/
+**/results_tensorboard/
+events.out.tfevents.*
+runs/
+outputs/
+MUJOCO_LOG.TXT
+src/ant/assets/ant_[0-9]*.xml
+src/half_cheetah/assets/half_cheetah_[0-9]*.xml
+
+# Large experiment exports (curate explicitly before committing)
+*.mat
+*.zip
