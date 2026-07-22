@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Grover
     given-names: Divij
-repository-code: "https://github.com/Divij96/master_thesis"
+repository-code: "https://github.com/Divij96/learning-based-control-design-optimization"
 license: MIT
 keywords:
   - reinforcement learning

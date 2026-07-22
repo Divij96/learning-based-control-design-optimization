@@ -1,0 +1,491 @@
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+
+import gymnasium as gym
+from gymnasium import spaces
+from gymnasium import utils
+from gymnasium.spaces import Box
+import math as m
+import random
+
+import numpy as np
+import math as m
+import math
+
+from shapely.geometry import Point
+from shapely.geometry.polygon import Polygon
+from shapely.geometry import LineString
+
+from scipy.io import loadmat, savemat
+
+import sys
+sys.path.append(f'{REPO_ROOT}/cpp/bindings/build/python')
+import robot_chain_dynamics_wrapper
+
+class Robot_Chain_Env(utils.EzPickle, gym.Env):
+    metadata = {
+        "render_modes": [
+            "human",
+        ],
+        "render_fps": 20,
+    }
+
+    def __init__(self, REWARD = np.array([0.7, 0.0, 0.3]), env_id = 0, arm_length = [1.0, 1.0], num_links=4 ,call_back = f"random_design"):
+        super(Robot_Chain_Env, self).__init__()
+
+        utils.EzPickle.__init__(self)
+        self.call_back = call_back
+        self.action_num = num_links
+        self.action_space = Box(low=-1, high=1, shape=(self.action_num,))
+
+        self.observation_num = 5 * num_links + 3
+        self.observation_space = Box(low=-1, high=1, shape=(self.observation_num,))
+        self.model = robot_chain_dynamics_wrapper
+        self.freq = 1 # 50 Hz
+        self.steps = 0
+        self.env_id = env_id
+
+        #reward function
+        self.TARGET_COEFF = REWARD[0]
+        self.SPEED_COEFF = REWARD[1]
+        self.ACTION_PENALTY_COEFF = REWARD[2]
+
+        # Define input parameters
+        self.num_links = num_links
+
+        # Define the random robot parameters based on the number of num_links
+
+        self.max_length = 3*np.ones(self.num_links, dtype=np.double)
+        self.min_length = 0.1*np.ones(self.num_links, dtype=np.double)
+
+        self.curr_joint_pos = np.ones(self.num_links, dtype=np.double)
+        self.prev_joint_pos = np.ones(self.num_links, dtype=np.double)
+        self.init_joint_pos = np.ones(self.num_links, dtype=np.double)
+        self.curr_joint_vel = np.ones(self.num_links, dtype=np.double)
+        self.arm_length = np.ones(self.num_links, dtype=np.double)
+        self.joint_torque = np.ones(self.num_links, dtype=np.double)
+
+        self.arm_length_sum = np.sum(self.max_length)
+        self.rho = np.array(2000.0, dtype=np.double)
+        self.radius = np.array(0.01, dtype=np.double)
+        self.workspace_radius = 2.0
+        self.target_threshold = self.convert_range(0.1, 0, 2*self.arm_length_sum, 0, 1)
+
+        # Initialize output arrays
+        self.pos_tcp = np.empty(3, dtype=np.double)
+        self.vel_tcp = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        self.target_pos_tcp = np.array([0.0, 0.0, 0.0], dtype=np.double)
+        self.curr_joint_acc = np.array([0.0, 0.0], dtype=np.double)
+        self.prev_pos_tcp = np.array([0.0, 0.0, 0.0], dtype=np.double)
+
+        # Initial time and time step
+        self.dt = 0.02 # 1 ms
+
+        self.max_joint_pos = m.pi * np.ones(self.num_links, dtype=np.double)
+        self.min_joint_pos = -m.pi * np.ones(self.num_links, dtype=np.double)
+        self.max_joint_vel = 20.0 * np.ones(self.num_links, dtype=np.double)
+        self.min_joint_vel = -20.0 * np.ones(self.num_links, dtype=np.double)
+
+        self.pos_tcp_range_x = np.array([-self.arm_length_sum, self.arm_length_sum], dtype=np.double)
+        self.pos_tcp_range_y = np.array([-self.arm_length_sum, self.arm_length_sum], dtype=np.double)
+        self.vel_tcp_range_x = np.array([-10.0, 10.0], dtype=np.double)
+        self.vel_tcp_range_y = np.array([-10.0, 10.0], dtype=np.double)
+
+        # # Instantiate the FirstOrderDelay class
+        self.max_torque = np.array([50.0, 25.0, 10.0, 5.0], dtype=np.double)
+        self.min_torque = -self.max_torque
+        self.filter = FirstOrderDelay(alpha=0.02)
+
+        # Instantiate the FirstOrderDelay class
+        # self.max_torque = m.pi * np.ones(self.num_links, dtype=np.double)
+        # self.min_torque = -m.pi * np.ones(self.num_links, dtype=np.double)
+        # self.filter = FirstOrderDelay(alpha=0.02)
+
+        #define collision patterns
+        self.collision_pattern_1 = self.collision_geometry_maze(2.5, start_x=-1.0, start_y=-0.75)
+
+        self.continue_training = True
+        np.set_printoptions(precision=2)
+
+    def step(self, action):
+
+        self.steps += 1
+        done = False
+        early_Stop = False
+        collision = False
+
+        joint_torque_action = self.convert_range(action, -1, 1, self.min_torque, self.max_torque)
+
+
+        for _ in range(self.freq):
+            # Call the wrapped function
+            self.joint_torque = self.filter.step(joint_torque_action)
+            self.model.robot_chain_dynamics(self.curr_joint_pos, self.curr_joint_vel,
+                                        self.rho, self.num_links, self.radius, self.arm_length,
+                                        self.joint_torque, self.curr_joint_acc, self.pos_tcp)
+
+            # Integrating the acceleration to get velocity
+            self.curr_joint_vel = self.curr_joint_vel + self.curr_joint_acc * self.dt
+            self.curr_joint_vel = np.array(self.curr_joint_vel, dtype=np.double)
+            self.curr_joint_vel = np.clip(self.curr_joint_vel, self.min_joint_vel, self.max_joint_vel)
+
+            # Integrating the velocity to get position
+            self.curr_joint_pos = self.curr_joint_pos + self.curr_joint_vel * self.dt
+            self.curr_joint_pos = np.array(self.curr_joint_pos, dtype=np.double)
+
+            #differentiate the position to get velocity
+            self.vel_tcp = (self.pos_tcp - self.prev_pos_tcp) / self.dt
+            self.prev_pos_tcp = self.pos_tcp.copy()
+
+        # Integrating the velocity to get position
+        # self.curr_joint_pos = self.filter.step(joint_torque_action)
+        # self.curr_joint_vel = (self.curr_joint_pos - self.prev_joint_pos) / self.dt
+
+        self.prev_joint_pos = self.curr_joint_pos
+
+        start_point = (0, 0)
+        end_points = []
+        accumulated_angle = 0  # Initialize accumulated angle
+
+        for i, length in enumerate(self.arm_length):
+            accumulated_angle += self.curr_joint_pos[i]  # Accumulate joint angles
+            end_point = (
+                start_point[0] + length * math.cos(accumulated_angle),
+                start_point[1] + length * math.sin(accumulated_angle)
+            )
+            start_point = end_point
+        self.pos_tcp = np.array([end_point[0], end_point[1], 0.0], dtype=np.double)
+
+        self.vel_tcp = (self.pos_tcp - self.prev_pos_tcp) / self.dt
+        self.prev_pos_tcp = self.pos_tcp
+
+        #check for collisions
+        start_point = (0, 0)
+        end_points = []
+        accumulated_angle = 0  # Initialize accumulated angle
+        for i, length in enumerate(self.arm_length):
+            accumulated_angle += self.curr_joint_pos[i]  # Accumulate joint angles
+            end_point = (
+                start_point[0] + length * math.cos(accumulated_angle),
+                start_point[1] + length * math.sin(accumulated_angle)
+            )
+
+            end_points.append(end_point)
+            # Current segment of the robot arm
+            current_segment = LineString([start_point, end_point])
+
+            # Check for intersection with each line segment in the zigzag patterns
+            for pattern in [self.collision_pattern_1]:
+                for j in range(len(pattern) - 1):
+                    zigzag_segment = LineString([pattern[j], pattern[j+1]])
+                    if current_segment.intersects(zigzag_segment):
+                        # print(f"Intersection found between arm segment {i} and zigzag segment {j}")
+                        collision = True
+
+            start_point = end_point
+
+        # joint position should be converted to range -pi to pi for e.g. pi to 3pi or 3pi to 5pi tpshould be converted to -pi to pi
+
+        self.curr_joint_pos = np.fmod(self.curr_joint_pos + np.pi, 2 * np.pi) - np.pi
+
+        obs_joint_torque = self.convert_range(self.joint_torque, self.min_torque, self.max_torque, -1, 1)
+        obs_joint_pos   = self.convert_range(self.curr_joint_pos, self.min_joint_pos, self.max_joint_pos, -1, 1)
+        obs_joint_vel   = self.convert_range(self.curr_joint_vel, self.min_joint_vel, self.max_joint_vel, -1, 1)
+        obs_arm_length  = self.convert_range(self.arm_length, self.min_length, self.max_length, -1, 1)
+        obs_joint_acc   = self.convert_range(self.curr_joint_acc, self.min_joint_vel, self.max_joint_vel, -1, 1)
+        obs_tcp_pos     = np.array([self.convert_range(self.pos_tcp[0], self.pos_tcp_range_x[0], self.pos_tcp_range_x[1], -1, 1)
+                                    ,self.convert_range(self.pos_tcp[1], self.pos_tcp_range_y[0], self.pos_tcp_range_y[1], -1, 1)
+                                    ,0])
+        obs_target_pos  = np.array([self.convert_range(self.target_pos_tcp[0], self.pos_tcp_range_x[0], self.pos_tcp_range_x[1], -1, 1)
+                                    ,self.convert_range(self.target_pos_tcp[1], self.pos_tcp_range_y[0], self.pos_tcp_range_y[1], -1, 1)
+                                    ,0])
+        obs_vel_tcp     = np.array([self.convert_range(self.vel_tcp[0], self.vel_tcp_range_x[0], self.vel_tcp_range_x[1], -1, 1)
+                                    ,self.convert_range(self.vel_tcp[1], self.vel_tcp_range_y[0], self.vel_tcp_range_y[1], -1, 1)
+                                    ,0])
+        obs_link_pos_task_space = np.concatenate(end_points)
+        obs_link_pos_task_space = np.array(self.convert_range(obs_link_pos_task_space, self.pos_tcp_range_x[0], self.pos_tcp_range_x[1], -1, 1))
+
+        obs_pos_vec = obs_tcp_pos - obs_target_pos
+        target_dist = np.linalg.norm(self.target_pos_tcp - self.pos_tcp)
+        target_dist = self.convert_range(target_dist, 0, 2*self.arm_length_sum, 0, 1)
+        obs_target_dist = np.array([target_dist], dtype=np.double)
+
+        reward_target = 1 / (target_dist + 1e-6)
+        reward_target = np.clip(reward_target, 0, 1/self.target_threshold)
+        reward_target = self.convert_range(reward_target, 0, 1/self.target_threshold, 0, 1)
+        # reward_target = 1 - obs_target_dist
+
+        if obs_target_dist < self.target_threshold:
+            reward_target = 1.0
+
+        reward = self.TARGET_COEFF * reward_target
+
+        if collision:
+            reward = -1.0
+            done = True
+
+        polygon_vertices = self.collision_pattern_1
+
+        if not self.is_point_inside_polygon(end_point, polygon_vertices):
+            reward = -1.0
+
+        observation = np.concatenate([obs_pos_vec[:2],
+                                      obs_target_dist , obs_joint_pos,
+                                      obs_link_pos_task_space, obs_joint_torque,
+                                      obs_arm_length])
+
+        info = {'joint_pos': self.curr_joint_pos, 'arm_length': self.arm_length,
+                'joint_torque': self.joint_torque, 'pos_tcp': self.pos_tcp, 'vel_tcp': self.vel_tcp,
+                'target_pos': self.target_pos_tcp, 'collision_pattern_1': self.collision_pattern_1}
+
+        observation = observation.astype(np.float32)
+        reward = float(reward)
+
+        if (np.any(np.isnan(observation)) or np.any(np.isinf(observation))):
+            print("nan or inf detected in step", self.arm_length)
+            print(observation)
+            observation = np.ones(self.observation_num)
+            reward = -1.0
+            reward = float(reward)
+            done = True
+            early_Stop = True
+        return observation, reward, done, early_Stop, info
+
+    def reset(self, seed=None):
+
+        self.steps = 0
+
+        # reset the robot
+        self.curr_joint_pos = np.zeros(self.num_links, dtype=np.double)
+        self.curr_joint_vel = np.zeros(self.num_links, dtype=np.double)
+        self.curr_joint_acc = np.zeros(self.num_links, dtype=np.double)
+        self.pos_tcp = np.empty(3, dtype=np.double)
+        self.joint_torque = np.zeros(self.num_links, dtype=np.double)
+        #Randomize the arm length
+        if self.call_back == "random_design":
+            arm_length_temp = [random.uniform(self.min_length[0], self.max_length[0]) for _ in range(self.num_links)]
+
+            # self.init_joint_pos = [random.uniform(self.min_joint_pos[0], self.max_joint_pos[0]) for _ in range(self.num_links)]
+
+            self.arm_length = arm_length_temp
+            self.arm_length[0] = 2.0
+            self.init_joint_pos = [0 for _ in range(self.num_links)]
+            self.init_joint_pos[0]  = -m.pi/2
+            self.init_joint_pos[1]  = m.pi/2
+            self.init_joint_pos[2]  = m.pi/2
+            self.init_joint_pos[3] = 0
+
+        elif self.call_back == "Hebo_Gauss_callback":
+            # self.init_joint_pos = [0 for _ in range(self.num_links)]
+            # self.init_joint_pos[0]  = -m.pi/2
+            self.init_joint_pos = [0 for _ in range(self.num_links)]
+            self.init_joint_pos[0]  = -m.pi/2
+            self.init_joint_pos[3]  = m.pi/2
+            self.init_joint_pos[4]  = m.pi/2
+
+        elif self.call_back == "eval":
+            self.init_joint_pos = [0 for _ in range(self.num_links)]
+            self.init_joint_pos[0]  = -m.pi/2
+            self.init_joint_pos[1]  = m.pi/2
+            self.init_joint_pos[2]  = m.pi/2
+            self.arm_length = [random.uniform(self.min_length[0], self.max_length[0]) for _ in range(self.num_links)]
+            self.arm_length[0] = 2.0
+
+            # self.arm_length = [1.0, 1.0, 0.7200255052672465, 0.7200255052672465, 1.2880038719584146, 1.2880038719584146, 1.228026959536499, 1.228026959536499]
+
+
+
+
+            # arm_length_temp = np.array([random.uniform(0.875, 0.981),
+            #                             random.uniform(0.841, 1.029),
+            #                             random.uniform(1.05, 1.142)])
+
+            # self.arm_length = [1.0, 1.0,
+            #                    arm_length_temp[0], arm_length_temp[0],
+            #                    arm_length_temp[1], arm_length_temp[1],
+            #                    arm_length_temp[2], arm_length_temp[2]]
+            # self.init_joint_pos = [random.uniform(self.min_joint_pos[0], self.max_joint_pos[0]) for _ in range(self.num_links)]
+        self.filter = FirstOrderDelay(alpha=0.02, initial_output=np.array(self.init_joint_pos))
+
+        self.target_pos_tcp = np.array([4.5, 1.5, 0.0], dtype=np.double)
+        # restrict arm length to 2 significant digits
+        self.arm_length = np.round(self.arm_length, 2)
+        self.curr_joint_pos = self.init_joint_pos
+        self.vel_tcp = np.array([0.0, 0.0, 0.0], dtype=np.double)
+
+        obs_joint_torque = self.convert_range(self.joint_torque, self.min_torque, self.max_torque, -1, 1)
+        obs_joint_pos   = self.convert_range(self.curr_joint_pos, self.min_joint_pos, self.max_joint_pos, -1, 1)
+        obs_joint_vel   = self.convert_range(self.curr_joint_vel, self.min_joint_vel, self.max_joint_vel, -1, 1)
+        obs_arm_length  = self.convert_range(self.arm_length, self.min_length, self.max_length, -1, 1)
+        obs_joint_acc   = self.convert_range(self.curr_joint_acc, self.min_joint_vel, self.max_joint_vel, -1, 1)
+        obs_tcp_pos     = np.array([self.convert_range(self.pos_tcp[0], self.pos_tcp_range_x[0], self.pos_tcp_range_x[1], -1, 1)
+                                    ,self.convert_range(self.pos_tcp[1], self.pos_tcp_range_y[0], self.pos_tcp_range_y[1], -1, 1)
+                                    ,0])
+        obs_target_pos  = np.array([self.convert_range(self.target_pos_tcp[0], self.pos_tcp_range_x[0], self.pos_tcp_range_x[1], -1, 1)
+                                    ,self.convert_range(self.target_pos_tcp[1], self.pos_tcp_range_y[0], self.pos_tcp_range_y[1], -1, 1)
+                                    ,0])
+        obs_vel_tcp     = np.array([self.convert_range(self.vel_tcp[0], self.vel_tcp_range_x[0], self.vel_tcp_range_x[1], -1, 1)
+                                    ,self.convert_range(self.vel_tcp[1], self.vel_tcp_range_y[0], self.vel_tcp_range_y[1], -1, 1)
+                                    ,0])
+
+        obs_pos_vec = obs_tcp_pos - obs_target_pos
+        target_dist = np.linalg.norm(self.target_pos_tcp - self.pos_tcp)
+        target_dist = self.convert_range(target_dist, 0, 2*self.arm_length_sum, 0, 1)
+        obs_target_dist = np.array([target_dist], dtype=np.double)
+
+        #check for collisionss
+
+        start_point = (0, 0)
+        end_points = []
+        accumulated_angle = 0  # Initialize accumulated angle
+        for i, length in enumerate(self.arm_length):
+            accumulated_angle += self.curr_joint_pos[i]  # Accumulate joint angles
+            end_point = (
+                start_point[0] + length * math.cos(accumulated_angle),
+                start_point[1] + length * math.sin(accumulated_angle)
+            )
+
+            end_points.append(end_point)
+            # Current segment of the robot arm
+            current_segment = LineString([start_point, end_point])
+
+            # Check for intersection with each line segment in the zigzag patterns
+            for pattern in [self.collision_pattern_1]:
+                for j in range(len(pattern) - 1):
+                    zigzag_segment = LineString([pattern[j], pattern[j+1]])
+                    if current_segment.intersects(zigzag_segment):
+                        # print(f"Intersection found between arm segment {i} and zigzag segment {j}")
+                        done = True
+
+            start_point = end_point
+        obs_link_pos_task_space = np.concatenate(end_points)
+
+        # observation = np.ones(self.observation_num)
+        observation = np.concatenate([obs_pos_vec[:2],
+                                      obs_target_dist , obs_joint_pos,
+                                      obs_link_pos_task_space, obs_joint_torque,
+                                      obs_arm_length])
+
+
+        if (np.any(np.isnan(observation)) or np.any(np.isinf(observation))):
+            print("nan or inf detected in reset", self.arm_length)
+            print(observation)
+            observation = np.ones(self.observation_num)
+            print(observation)
+
+
+        info = {'joint_pos': self.curr_joint_pos, 'arm_length': self.arm_length,
+                'joint_torque': self.joint_torque, 'pos_tcp': self.pos_tcp, 'vel_tcp': self.vel_tcp,
+                'target_pos': self.target_pos_tcp}
+
+        return observation, info
+
+    def set_arm_length(self, arm_length):
+        self.arm_length = [1.0, 1.0,
+                            arm_length[0], arm_length[0],
+                            arm_length[1], arm_length[1],
+                            arm_length[2], arm_length[2]]
+
+    def get_arm_length(self):
+        return self.arm_length
+
+    def set_env_id(self, env_id):
+        self.env_id = env_id
+
+    def get_env_id(self):
+        return self.env_id
+
+    def get_target_pos_tcp(self):
+        return self.target_pos_tcp
+
+    def render(self, mode='human'):
+        pass
+
+    def close(self):
+        pass
+
+    def deg_to_rad(self, deg):
+        return deg * m.pi / 180.0
+
+    def generate_target_position(self, radius, theta):
+        x = radius * np.cos(theta)
+        y = radius * np.sin(theta)
+        return np.array([x, y, 0.0])
+
+    def convert_range(self,x, min_x, max_x, min_y, max_y):
+        return (x - min_x) / (max_x - min_x) * (max_y - min_y) + min_y
+
+    def set_target_pos_tcp(self, theta, radius):
+        self.target_pos_tcp = self.generate_target_position(radius, theta)
+
+    def get_target_pos_tcp(self):
+        return self.target_pos_tcp
+
+    def set_init_joint_pos(self, joint_pos):
+        self.init_joint_pos = joint_pos
+
+    def get_curr_joint_pos(self):
+        return self.curr_joint_pos
+
+    def collision_geometry(self, length, start_x=0, start_y=0):
+        # Define the starting point of the zigzag pattern
+        start_x = start_x
+        start_y = start_y
+
+        # Define the points for the zigzag pattern
+        points = [
+            (start_x, start_y),
+            (start_x + length, start_y + length),  # First line segment
+            (start_x + 2 * length, start_y),       # Second line segment
+            (start_x + 3 * length, start_y + length),  # Third line segment
+            (start_x + 4 * length, start_y)        # Fourth line segment
+        ]
+
+        return points
+
+    def collision_geometry_maze(self, length, start_x=0, start_y=0):
+        start_x = start_x
+        start_y = start_y
+
+        points = [
+            (3.1, 1),
+            (3.1, 2),
+            (start_x + 2*length, 2),
+            (start_x + 2*length, 1),
+            (start_x + 2.5*length, 1),
+            (start_x + 2.5*length, 4),
+            (0.0, 4),
+            (0.0, 1),
+
+        ]
+
+        return points
+
+    def is_point_inside_polygon(self, point, polygon_vertices):
+        """
+        Check if a point is inside a polygon
+
+        :param point: A tuple (x, y) representing the point
+        :param polygon_vertices: A list of tuples [(x1, y1), (x2, y2), ...] representing the vertices of the polygon
+        :return: True if the point is inside the polygon, False otherwise
+        """
+        shapely_point = Point(point)
+        shapely_polygon = Polygon(polygon_vertices)
+        return shapely_polygon.contains(shapely_point)
+
+    def set_continue_training(self, continue_training):
+        self.continue_training = continue_training
+
+    def get_continue_training(self):
+        return self.continue_training
+
+class FirstOrderDelay:
+    def __init__(self, alpha, initial_output=0):
+        self.alpha = alpha
+        self.previous_output = initial_output
+
+    def step(self, current_input):
+        current_output = (1 - self.alpha) * self.previous_output + self.alpha * current_input
+        self.previous_output = current_output
+        return current_output
