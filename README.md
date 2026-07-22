@@ -1,6 +1,5 @@
 # Learning-Based Control and Design Co-Optimization
 
-[![Repository checks](https://github.com/Divij96/learning-based-control-design-optimization/actions/workflows/quality.yml/badge.svg)](https://github.com/Divij96/learning-based-control-design-optimization/actions/workflows/quality.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Research code from my master's thesis on jointly optimizing control policies and physical system parameters. The experiments combine reinforcement learning with Bayesian optimization and Gaussian-mixture sampling across simulated control systems ranging from cart-pole and quadcopter models to robot arms and MuJoCo locomotion tasks.
