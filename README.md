@@ -101,13 +101,6 @@ The historical target environment was Ubuntu 20.04, ROS Noetic, and MATLAB/Simul
 
 Raw `_grt_rtw`, `codegen`, `slprj`, build, devel, and install directories remain excluded because they are intermediate or reproducible build output. MATLAB `packageInfo.mat` files are also excluded. See [cpp/generated/README.md](cpp/generated/README.md) for package details and regeneration notes.
 
-## Reproducibility notes
-
-- Random seeds were not consistently recorded in the original experiments, so exact learning curves may vary.
-- Large training runs can require tens or hundreds of millions of environment steps.
-- `MASTER_THESIS_INPUT_CMD` can point model-comparison scripts to an external MATLAB input file; experiment `.mat` files are not distributed.
-- New checkpoints, TensorBoard logs, generated MuJoCo variants, build products, and outputs are ignored by Git.
-
 ## Licensing and attribution
 
 Original work is released under the [MIT License](LICENSE). Third-party models and generated code retain their own notices and usage terms; they are not relicensed by the root MIT license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
